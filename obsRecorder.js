@@ -2,10 +2,19 @@ const path = require('path');
 const { Subject } = require('rxjs');
 const { first } = require('rxjs/operators');
 const { byOS, OS, getOS } = require('./operating-systems');
-
+const { ipcRenderer } = require('electron');
 const osn = require("obs-studio-node");
-const { v4: uuid } = require('uuid');
-const videoPath = (require("electron").app).getPath("videos");
+// const { v4:uuid } = require('uuid');
+// const { v4: uuidv4 } = require('uuid');
+const { v4: uuidv4 } = require('uuid');
+const { error } = require('console');
+
+const EVcamInstalledStatus = {
+  NotInstalled: 0,
+  LegacyInstalled: 1,
+  Installed: 2
+};
+
 let nwr;
 
 // NWR is used to handle display rendering via IOSurface on mac
@@ -25,7 +34,7 @@ function fixPathWhenPackaged(p) {
 function initialize(win) {
   if (obsInitialized) {
     console.warn("OBS is already initialized, skipping initialization.");
-    return;
+    return true;
   }
 
   initOBS();
@@ -34,22 +43,24 @@ function initialize(win) {
   setupSources(scene);
   obsInitialized = true;
 
-  const perfStatTimer = setInterval(() => {
-	  win.webContents.send("performanceStatistics", osn.NodeObs.OBS_API_getPerformanceStatistics());
-  }, 1000);
+  // const perfStatTimer = setInterval(() => {
+	//   win.webContents.send("performanceStatistics", osn.NodeObs.OBS_API_getPerformanceStatistics());
+  // }, 1000);
 
-  win.on('close', () => clearInterval(perfStatTimer));
+  // win.on('close', () => clearInterval(perfStatTimer));
+  return true;
 }
 
 function initOBS() {
   console.debug('Initializing OBS...');
-  osn.NodeObs.IPC.host(`obs-studio-node-example-${uuid()}`);
-  osn.NodeObs.SetWorkingDirectory(fixPathWhenPackaged(path.join(__dirname, 'node_modules', 'obs-studio-node')));
-
-  const obsDataPath = fixPathWhenPackaged(path.join(__dirname, 'osn-data')); // OBS Studio configs and logs
-  // Arguments: locale, path to directory where configuration and logs will be stored, your application version
-  const initResult = osn.NodeObs.OBS_API_initAPI('en-US', obsDataPath, '1.0.0');
-
+  osn.IPC.host(`${uuidv4()}`);
+  const obsPakagePath = path.join(remote.app.getAppPath(), "node_modules", "obs-studio-node");
+  console.log(obsPakagePath);
+  osn.NodeObs.SetWorkingDirectory(obsPakagePath);
+  const obsDataPath = path.join(remote.app.getAppPath(), "osn-data");
+  console.log(obsDataPath);
+  const initResult = osn.NodeObs.OBS_API_initAPI("en-US", obsDataPath, "1.0.0", "");
+  console.log("initbosx...", initResult === 0 ? "success" : "error");
   if (initResult !== 0) {
     const errorReasons = {
       '-2': 'DirectX could not be found on your system. Please install the latest version of DirectX for your machine here <https://www.microsoft.com/en-us/download/details.aspx?id=35?> and try again.',
@@ -73,163 +84,73 @@ function initOBS() {
 }
 
 function configureOBS() {
-  console.debug('Configuring OBS');
+
+  console.debug("Configuring OBS");
   setSetting('Output', 'Mode', 'Advanced');
   const availableEncoders = getAvailableValues('Output', 'Recording', 'RecEncoder');
   setSetting('Output', 'RecEncoder', availableEncoders.slice(-1)[0] || 'x264');
-  setSetting('Output', 'RecFilePath', videoPath);
+  setSetting('Output', 'RecFilePath', remote.app.getPath("videos"));
   setSetting('Output', 'RecFormat', 'mkv');
   setSetting('Output', 'VBitrate', 10000); // 10 Mbps
   setSetting('Video', 'FPSCommon', 60);
-
-  console.debug('OBS Configured');
+  console.log("OBS Configured");
 }
 
 function isVirtualCamPluginInstalled() {
-  return osn.NodeObs.OBS_service_isVirtualCamPluginInstalled();
+  const result = osn.NodeObs.OBS_service_isVirtualCamPluginInstalled();
+  console.log("OBS_service_isVirtualCamPluginInstalled : " + result)
+  if (result === EVcamInstalledStatus.Installed) {
+    return true;
+  }
+  return false;
 }
 
 function installVirtualCamPlugin() {
-  osn.NodeObs.OBS_service_installVirtualCamPlugin();
-  return osn.NodeObs.OBS_service_isVirtualCamPluginInstalled();
+  const result = osn.NodeObs.OBS_service_installVirtualCamPlugin();
+  console.log("install virtual cam plugin result: " + result)
+  return isVirtualCamPluginInstalled();
 }
 
 function uninstallVirtualCamPlugin() {
   osn.NodeObs.OBS_service_uninstallVirtualCamPlugin();
-  return !osn.NodeObs.OBS_service_isVirtualCamPluginInstalled();
+  return !isVirtualCamPluginInstalled();
 }
 
 function startVirtualCam() {
-  osn.NodeObs.OBS_service_createVirtualWebcam("obs-studio-node-example-cam");
-  osn.NodeObs.OBS_service_startVirtualWebcam();
+  osn.NodeObs.OBS_service_startVirtualCam();
 }
 
 function stopVirtualCam() {
-  osn.NodeObs.OBS_service_stopVirtualWebcam();
-  osn.NodeObs.OBS_service_removeVirtualWebcam();
-}
-
-
-
-// Get information about prinary display
-function displayInfo() {
-  const { screen } = require('electron');
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width, height } = primaryDisplay.size;
-  const { scaleFactor } = primaryDisplay;
-  return {
-    width,
-    height,
-    scaleFactor:    scaleFactor,
-    aspectRatio:    width / height,
-    physicalWidth:  width * scaleFactor,
-    physicalHeight: height * scaleFactor,
-  }
-}
-
-function getCameraSource() {
-  console.debug('Trying to set up web camera...')
-
-  // Setup input without initializing any device just to get list of available ones
-  const dummyInput = byOS({
-    [OS.Windows]: () =>
-      osn.InputFactory.create('dshow_input', 'video', {
-        audio_device_id: 'does_not_exist',
-        video_device_id: 'does_not_exist',
-      }),
-    [OS.Mac]: () =>
-      osn.InputFactory.create('av_capture_input', 'video', {
-        device: 'does_not_exist',
-      })
-  });
-
-  const cameraItems = dummyInput.properties.get(byOS({ [OS.Windows]: 'video_device_id', [OS.Mac]: 'device' })).details.items;
-
-  dummyInput.release();
-
-  if (cameraItems.length === 0) {
-    console.debug('No camera found!!')
-    return null;
-  }
-
-  const deviceId = cameraItems[0].value;
-  cameraItems[0].selected = true;
-  console.debug('cameraItems[0].name: ' + cameraItems[0].name);
-
-  const obsCameraInput = byOS({
-    [OS.Windows]: () =>
-      osn.InputFactory.create('dshow_input', 'video', {
-        video_device_id: deviceId,
-      }),
-    [OS.Mac]: () =>
-      osn.InputFactory.create('av_capture_input', 'video', {
-        device: deviceId,
-      }),
-  })
-
-  // It's a hack to wait a bit until device become initialized (maximum for 1 second)
-  // If you know proper way how to determine whether camera is working and how to subscribe for any events from it, create a pull request
-  // See discussion at https://github.com/Envek/obs-studio-node-example/issues/10
-  for (let i = 1; i <= 4; i++) {
-    if (obsCameraInput.width === 0) {
-      const waitMs = 100 * i;
-      console.debug(`Waiting for ${waitMs}ms until camera get initialized.`);
-      busySleep(waitMs); // We can't use async/await here
-    }
-  }
-
-  if (obsCameraInput.width === 0) {
-    console.debug(`Found camera "${cameraItems[0].name}" doesn't seem to work as its reported width is still zero.`);
-    return null;
-  }
-
-  // Way to update settings if needed:
-  // let settings = obsCameraInput.settings;
-  // console.debug('Camera settings:', obsCameraInput.settings);
-  // settings['width'] = 320;
-  // settings['height'] = 240;
-  // obsCameraInput.update(settings);
-  // obsCameraInput.save();
-
-  return obsCameraInput;
+  osn.NodeObs.OBS_service_stopVirtualCam();
 }
 
 function setupScene() {
-  const videoSource = osn.InputFactory.create(byOS({ [OS.Windows]: 'monitor_capture', [OS.Mac]: 'display_capture' }), 'desktop-video');
-
-  const { physicalWidth, physicalHeight, aspectRatio } = displayInfo();
-
-  // Update source settings:
-  let settings = videoSource.settings;
+  const browser_source = osn.InputFactory.create('browser_source', 'browser_source');
+  let { physicalWidth, physicalHeight, aspectRatio } = displayInfo();
+  console.log("physicalWidth = "+  physicalWidth + "physicalHeight = " + physicalHeight)
+  physicalWidth = 1080;
+  physicalHeight = 1920;
+  let settings = browser_source.settings;
   settings['width'] = physicalWidth;
   settings['height'] = physicalHeight;
-  videoSource.update(settings);
-  videoSource.save();
+  // settings['url'] = 'https://c.lnsee.com/lxweb/#/rtc?url=webrtc://bjwebrtc16.jinsemengxiang.cn/lxlive/197215'
+  settings['url'] = 'https://c.lnsee.com/lxweb/#/rtc?url=webrtc://bjwebrtc13.jinsemengxiang.cn/lxlive/197016'
+  // settings['url'] = 'https://www.baidu.com';
+  browser_source.update(settings);
+  browser_source.save();``
 
   // Set output video size to 1920x1080
-  const outputWidth = 1920;
-  const outputHeight = Math.round(outputWidth / aspectRatio);
+  const outputWidth = 1080;
+  // const outputHeight = Math.round(outputWidth / aspectRatio);
+  const outputHeight = 1920;
   setSetting('Video', 'Base', `${outputWidth}x${outputHeight}`);
   setSetting('Video', 'Output', `${outputWidth}x${outputHeight}`);
   const videoScaleFactor = physicalWidth / outputWidth;
 
   // A scene is necessary here to properly scale captured screen size to output video size
   const scene = osn.SceneFactory.create('test-scene');
-  const sceneItem = scene.add(videoSource);
+  const sceneItem = scene.add(browser_source);
   sceneItem.scale = { x: 1.0/ videoScaleFactor, y: 1.0 / videoScaleFactor };
-
-  // If camera is available, make it 1/3 width of video and place it to right down corner of display
-  const cameraSource = getCameraSource();
-  if (cameraSource) {
-    const cameraItem = scene.add(cameraSource);
-    const cameraScaleFactor = 1.0 / (3.0 * cameraSource.width / outputWidth);
-    cameraItem.scale = { x: cameraScaleFactor, y: cameraScaleFactor };
-    cameraItem.position = {
-      x: outputWidth - cameraSource.width * cameraScaleFactor - outputWidth / 10,
-      y: outputHeight - cameraSource.height * cameraScaleFactor - outputHeight / 10,
-    };
-  }
-
   return scene;
 }
 
@@ -269,25 +190,103 @@ function setupSources() {
   setSetting('Output', 'RecTracks', parseInt('1'.repeat(currentTrack-1), 2)); // Bit mask of used tracks: 1111 to use first four (from available six)
 }
 
+function displayInfo() {
+  const primaryDisplay = remote.screen.getPrimaryDisplay();
+  const { width, height } = primaryDisplay.size;
+  const { scaleFactor } = primaryDisplay;
+  return {
+    width,
+    height,
+    scaleFactor,
+    aspectRatio: width / height,
+    physicalWidth: width * scaleFactor,
+    physicalHeight: height * scaleFactor
+  };
+}
+
+
 const displayId = 'display1';
 
 function setupPreview(window, bounds) {
-  osn.NodeObs.OBS_content_createSourcePreviewDisplay(
-    window.getNativeWindowHandle(),
-    scene.name, // or use camera source Id here
-    displayId,
-  );
-  osn.NodeObs.OBS_content_setShouldDrawUI(displayId, false);
-  osn.NodeObs.OBS_content_setPaddingSize(displayId, 0);
-  // Match padding color with main window background color
-  osn.NodeObs.OBS_content_setPaddingColor(displayId, 255, 255, 255);
 
+  try{
+  
+    console.log(scene.getItems())
+    console.log(scene, 'scene')
+    const context = osn.VideoFactory.create()
+    // console.log(context, context.video, remote.getCurrentWindow().getNativeWindowHandle())
+  
+  
+    console.log(context)
+    context.video = {
+      fpsNum: 30,
+      fpsDen: 1,
+      baseWidth: 1080,
+      baseHeight: 1920,
+      outputWidth: bounds.width,
+      outputHeight: bounds.height,
+      outputFormat: 11,
+    };
+  
+    // 采用createDisplay必备
+    const defaultTransition = osn.TransitionFactory.create('cut_transition', "test_transition_a");
+  
+    defaultTransition.set(scene);
+    osn.Global.setOutputSource(0, defaultTransition);
+  
+    // osn.NodeObs.OBS_content_createSourcePreviewDisplay(
+    //   window.getNativeWindowHandle(),
+    //   scene.name,
+    //   displayId,
+    //   false,
+    //   context,
+    // );
+  
+    osn.NodeObs.OBS_content_createDisplay(
+      window.getNativeWindowHandle(),
+      displayId,
+      0,
+      false,
+      context,
+    );
+  
+    osn.NodeObs.OBS_content_setShouldDrawUI(displayId, true);
+    osn.NodeObs.OBS_content_setPaddingSize(displayId, 0);
+    osn.NodeObs.OBS_content_setPaddingColor(displayId, 255, 255, 255);
+
+    
+  } catch(e) {
+    console.log('display render over here error' + error)
+  }
+
+  // const {aspectRatio, scaleFactor} = displayInfo();
+  
+  // const displayWidth = Math.floor(bounds.width);
+  // const displayHeight = Math.round(displayWidth / aspectRatio);
+  // const displayX = Math.floor(bounds.x);
+  // const displayY = Math.floor(bounds.y);
+
+  // osn.NodeObs.OBS_content_resizeDisplay(displayId, displayWidth * scaleFactor, displayHeight * scaleFactor);
+  // osn.NodeObs.OBS_content_moveDisplay(displayId, displayX * scaleFactor, displayY * scaleFactor);
+  // return { height: displayHeight }
+
+  // osn.NodeObs.OBS_content_createSourcePreviewDisplay(
+  //   window.getNativeWindowHandle(),
+  //   scene.name, // or use camera source Id here
+  //   displayId,
+  // );
+  // osn.NodeObs.OBS_content_setShouldDrawUI(displayId, false);
+  // osn.NodeObs.OBS_content_setPaddingSize(displayId, 0);
+  // // Match padding color with main window background color
+  // osn.NodeObs.OBS_content_setPaddingColor(displayId, 255, 255, 255);
   return resizePreview(window, bounds);
 }
 let existingWindow = false
 let initY = 0
 function resizePreview(window, bounds) {
   let { aspectRatio, scaleFactor } = displayInfo();
+  console.log("aspectRatio : " + aspectRatio)
+  console.log("scaleFactor : " + scaleFactor)
   if (getOS() === OS.Mac) {
     scaleFactor = 1
   }
@@ -320,7 +319,7 @@ function resizePreview(window, bounds) {
   return { height: displayHeight }
 }
 
-async function start() {
+function start() {
   if (!obsInitialized) initialize();
 
   let signalInfo;
@@ -329,15 +328,17 @@ async function start() {
   osn.NodeObs.OBS_service_startRecording();
 
   console.debug('Started?');
-  signalInfo = await getNextSignalInfo();
+  signalInfo = getNextSignalInfo();
 
   if (signalInfo.signal === 'Stop') {
     throw Error(signalInfo.error);
+    return { recording: false };
   }
 
   console.debug('Started signalInfo.type:', signalInfo.type, '(expected: "recording")');
   console.debug('Started signalInfo.signal:', signalInfo.signal, '(expected: "start")');
   console.debug('Started!');
+  return { recording: false };
 }
 
 async function stop() {
@@ -358,6 +359,7 @@ async function stop() {
   console.debug('After stop signalInfo.signal:', signalInfo.signal, '(expected: "stop")');
 
   console.debug('Stopped!');
+  return { recording: false };
 }
 
 function shutdown() {

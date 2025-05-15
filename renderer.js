@@ -1,8 +1,11 @@
-const { ipcRenderer, shell, remote } = require('electron');
+const { ipcRenderer, shell} = require('electron');
+const remote = require("@electron/remote");
+const obsRecorder = require('./obsRecorder');
 const path = require('path');
 
-async function initOBS() {
-  const result = await ipcRenderer.invoke('recording-init');
+function initOBS(win) {
+  // const result = await ipcRenderer.invoke('recording-init');
+  const result  = obsRecorder.initialize(win);
   console.debug("initOBS result:", result);
   if (result) {
     ipcRenderer.on("performanceStatistics", (_event, data) => onPerformanceStatistics(data));
@@ -10,13 +13,15 @@ async function initOBS() {
 }
 
 async function startRecording() {
-  const result = await ipcRenderer.invoke('recording-start');
+  // const result = await ipcRenderer.invoke('recording-start');
+  const result = obsRecorder.start();
   console.debug("startRecording result:", result);
   return result;
 }
 
 async function stopRecording() {
-  const result = await ipcRenderer.invoke('recording-stop');
+  // const result = await ipcRenderer.invoke('recording-stop');
+  const result = await obsRecorder.stop();
   console.debug("stopRecording result:", result);
   return result;
 }
@@ -48,7 +53,8 @@ function updateRecordingUI() {
 }
 
 async function updateVirtualCamUI() {
-  if (await ipcRenderer.invoke('isVirtualCamPluginInstalled')) {
+  // if (await ipcRenderer.invoke('isVirtualCamPluginInstalled')) {
+  if (obsRecorder.isVirtualCamPluginInstalled()) {
     document.querySelector("#install-virtual-cam-plugin-button").style.display = "none";
     if (virtualCamRunning) {
       document.querySelector("#virtual-cam-plugin-status").innerText = "Running";
@@ -71,25 +77,29 @@ async function updateVirtualCamUI() {
 }
 
 async function uninstallVirtualCamPlugin() {
-  await ipcRenderer.invoke('uninstallVirtualCamPlugin');
-  updateVirtualCamUI();
+  // await ipcRenderer.invoke('uninstallVirtualCamPlugin');
+  obsRecorder.uninstallVirtualCamPlugin();
+  await updateVirtualCamUI();
 }
 
 async function installVirtualCamPlugin() {
-  await ipcRenderer.invoke('installVirtualCamPlugin');
-  updateVirtualCamUI();
+  // await ipcRenderer.invoke('installVirtualCamPlugin');
+  obsRecorder.installVirtualCamPlugin();
+  await updateVirtualCamUI();
 }
 
 async function startVirtualCam() {
-  await ipcRenderer.invoke('startVirtualCam');
+  // await ipcRenderer.invoke('startVirtualCam');
+  obsRecorder.startVirtualCam();
   virtualCamRunning = true;
-  updateVirtualCamUI();
+  await updateVirtualCamUI();
 }
 
 async function stopVirtualCam() {
-  await ipcRenderer.invoke('stopVirtualCam');
+  // await ipcRenderer.invoke('stopVirtualCam');
+  obsRecorder.stopVirtualCam();
   virtualCamRunning = false;
-  updateVirtualCamUI();
+  await updateVirtualCamUI();
 }
 
 function startTimer() {
@@ -126,17 +136,37 @@ function onPerformanceStatistics(data) {
 
 const previewContainer = document.getElementById('preview');
 
-async function setupPreview() {
+async function setupPreview(win) {
   const { width, height, x, y } = previewContainer.getBoundingClientRect();
-  const result = await ipcRenderer.invoke('preview-init', { width, height, x, y });
+  console.log("width : " + width + " height : " + height + " x : ", x, " y : " + y)
+  // const result = await ipcRenderer.invoke('preview-init', { width, height, x, y });
+  const result = obsRecorder.setupPreview(win, { width, height, x, y });
+  console.log('setupPreview result: ' + result)
   previewContainer.style = `height: ${result.height}px`;
 }
 
 async function resizePreview() {
   const { width, height, x, y } = previewContainer.getBoundingClientRect();
-  const result = await ipcRenderer.invoke('preview-bounds', { width, height, x, y });
+  // const result = await ipcRenderer.invoke('preview-bounds', { width, height, x, y });
+
+  const result = obsRecorder.resizePreview(currentWindow, { width, height, x, y });
   previewContainer.style = `height: ${result.height}px`;
 }
+
+async function startTask(currentWindow) {
+  initOBS(currentWindow);
+  setupPreview(currentWindow);
+  updateRecordingUI();
+  updateVirtualCamUI();
+}
+
+// 监听渲染进程的 beforeunload 事件
+window.addEventListener('beforeunload', (event) => {
+  console.log("will shutdown")
+  obsRecorder.shutdown();
+  // 可选：阻止默认行为
+  // event.returnValue = false;
+});
 
 const currentWindow = remote.getCurrentWindow();
 currentWindow.on('resize', resizePreview);
@@ -145,10 +175,7 @@ var ro = new ResizeObserver(resizePreview);
 ro.observe(document.querySelector("#preview"));
 
 try {
-  initOBS();
-  setupPreview();
-  updateRecordingUI();
-  updateVirtualCamUI();
+  startTask(currentWindow)
 } catch (err) {
   console.log(err)
 }
