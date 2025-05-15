@@ -16,7 +16,7 @@
   "author": "",
   "license": "GPL-2.0",  
   "dependencies": {
-    "obs-studio-node": "file://D:/Document/obs/osn-0.25.28-release-win64.tar.gz",
+    "obs-studio-node": "https://s3-us-west-2.amazonaws.com/obsstudionodes3.streamlabs.com/osn-0.24.43-release-win64.tar.gz",
     "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/utils": "^3.0.0",
     "@electron/remote": "^2.1.2",

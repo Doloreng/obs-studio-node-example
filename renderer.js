@@ -94,6 +94,10 @@ async function startVirtualCam() {
   virtualCamRunning = true;
   await updateVirtualCamUI();
 }
+async function shutdownOBS() {
+    obsRecorder.shutdown();
+    await updateVirtualCamUI();
+}
 
 async function stopVirtualCam() {
   // await ipcRenderer.invoke('stopVirtualCam');

@@ -9,11 +9,6 @@ const osn = require("obs-studio-node");
 const { v4: uuidv4 } = require('uuid');
 const { error } = require('console');
 
-const EVcamInstalledStatus = {
-  NotInstalled: 0,
-  LegacyInstalled: 1,
-  Installed: 2
-};
 
 let nwr;
 
@@ -99,15 +94,14 @@ function configureOBS() {
 function isVirtualCamPluginInstalled() {
   const result = osn.NodeObs.OBS_service_isVirtualCamPluginInstalled();
   console.log("OBS_service_isVirtualCamPluginInstalled : " + result)
-  if (result === EVcamInstalledStatus.Installed) {
+  if (result === 2) {
     return true;
   }
   return false;
 }
 
 function installVirtualCamPlugin() {
-  const result = osn.NodeObs.OBS_service_installVirtualCamPlugin();
-  console.log("install virtual cam plugin result: " + result)
+  osn.NodeObs.OBS_service_installVirtualCamPlugin();
   return isVirtualCamPluginInstalled();
 }
 
@@ -117,10 +111,12 @@ function uninstallVirtualCamPlugin() {
 }
 
 function startVirtualCam() {
+  // osn.NodeObs.startVirtualCam();
   osn.NodeObs.OBS_service_startVirtualCam();
 }
 
 function stopVirtualCam() {
+  // osn.NodeObs.stopVirtualCam();
   osn.NodeObs.OBS_service_stopVirtualCam();
 }
 
@@ -134,7 +130,7 @@ function setupScene() {
   settings['width'] = physicalWidth;
   settings['height'] = physicalHeight;
   // settings['url'] = 'https://c.lnsee.com/lxweb/#/rtc?url=webrtc://bjwebrtc16.jinsemengxiang.cn/lxlive/197215'
-  settings['url'] = 'https://c.lnsee.com/lxweb/#/rtc?url=webrtc://bjwebrtc13.jinsemengxiang.cn/lxlive/197016'
+  settings['url'] = 'https://c.lnsee.com/lxweb/#/rtc?url=webrtc://bjwebrtc15.jinsemengxiang.cn/lxlive/149725'
   // settings['url'] = 'https://www.baidu.com';
   browser_source.update(settings);
   browser_source.save();``
@@ -223,8 +219,8 @@ function setupPreview(window, bounds) {
       fpsDen: 1,
       baseWidth: 1080,
       baseHeight: 1920,
-      outputWidth: bounds.width,
-      outputHeight: bounds.height,
+      outputWidth: 1080,
+      outputHeight: 1920,
       outputFormat: 11,
     };
   
@@ -371,6 +367,9 @@ function shutdown() {
   console.debug('Shutting down OBS...');
 
   try {
+    // if (isVirtualCamPluginInstalled()){
+    //   osn.NodeObs.OBS_service_uninstallVirtualCamPlugin();
+    // }
     osn.NodeObs.OBS_service_removeCallback();
     osn.NodeObs.IPC.disconnect();
     obsInitialized = false;
